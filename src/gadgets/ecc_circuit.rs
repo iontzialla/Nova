@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 use crate::gadgets::utils::{
-  alloc_one, alloc_zero, conditionally_select, conditionally_select2, select_one_or, select_zero_or,
+  alloc_zero, alloc_true, alloc_false, conditionally_select, conditionally_select_bit, select_one_or, select_variable_or_one, select_zero_or
 };
 use bellperson::{
   gadgets::{
-    boolean::{AllocatedBit, Boolean},
+    boolean::AllocatedBit,
     num::AllocatedNum,
     Assignment,
   },
@@ -20,7 +20,7 @@ where
 {
   pub(crate) x: AllocatedNum<Fp>,
   pub(crate) y: AllocatedNum<Fp>,
-  pub(crate) is_infinity: AllocatedNum<Fp>,
+  pub(crate) is_infinity: AllocatedBit,
 }
 
 impl<Fp> AllocatedPoint<Fp>
@@ -28,24 +28,8 @@ where
   Fp: PrimeField,
 {
   //Creates a new allocated point from allocated nums.
-  pub fn new(x: AllocatedNum<Fp>, y: AllocatedNum<Fp>, is_infinity: AllocatedNum<Fp>) -> Self {
+  pub fn new(x: AllocatedNum<Fp>, y: AllocatedNum<Fp>, is_infinity: AllocatedBit) -> Self {
     Self { x, y, is_infinity }
-  }
-
-  //Check that is infinity is 0/1
-  #[allow(dead_code)]
-  pub fn check_is_infinity<CS: ConstraintSystem<Fp>>(
-    &self,
-    mut cs: CS,
-  ) -> Result<(), SynthesisError> {
-    //Check that is_infinity * ( 1 - is_infinity ) = 0
-    cs.enforce(
-      || "is_infinity is bit",
-      |lc| lc + self.is_infinity.get_variable(),
-      |lc| lc + CS::one() - self.is_infinity.get_variable(),
-      |lc| lc,
-    );
-    Ok(())
   }
 
   #[allow(dead_code)]
@@ -56,22 +40,13 @@ where
       let y = (x * x * x + Fp::one() + Fp::one() + Fp::one() + Fp::one() + Fp::one()).sqrt();
       if y.is_some().unwrap_u8() == 1 {
         let x_alloc = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(x))?;
+        let _ = x_alloc.inputize(cs.namespace(|| "Input point.x")); //HACK HACK get rid of this
         let y_alloc = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(y.unwrap()))?;
-        let is_infinity = alloc_zero(cs.namespace(|| "Is Infinity"))?;
+        let _ = y_alloc.inputize(cs.namespace(|| "Input point.y")); //HACK HACK get rid of this
+        let is_infinity = alloc_false(cs.namespace(|| "Is Infinity"))?;
         return Ok(Self::new(x_alloc, y_alloc, is_infinity));
       }
     }
-  }
-
-  //Make the point io
-  #[allow(dead_code)]
-  pub fn inputize<CS: ConstraintSystem<Fp>>(&self, mut cs: CS) -> Result<(), SynthesisError> {
-    let _ = self.x.inputize(cs.namespace(|| "Input point.x"));
-    let _ = self.y.inputize(cs.namespace(|| "Input point.y"));
-    let _ = self
-      .is_infinity
-      .inputize(cs.namespace(|| "Input point.is_infinity"));
-    Ok(())
   }
 
   //Adds other point to this point and returns the result
@@ -101,28 +76,21 @@ where
     );
 
     //Compute self.is_infinity OR other.is_infinity
-    let at_least_one_inf = AllocatedNum::alloc(cs.namespace(|| "at least one inf"), || {
-      Ok(*self.is_infinity.get_value().get()? * *other.is_infinity.get_value().get()?)
-    })?;
-    cs.enforce(
-      || "at least one inf = self.is_infinity * other.is_infinity",
-      |lc| lc + self.is_infinity.get_variable(),
-      |lc| lc + other.is_infinity.get_variable(),
-      |lc| lc + at_least_one_inf.get_variable(),
-    );
+    let both_not_inf = AllocatedBit::nor(
+        cs.namespace(|| "at least one inf = self.is_infinity * other.is_infinity"),
+        &self.is_infinity,
+        &other.is_infinity,
+    )?;
 
     //x_diff = 1 if either self.is_infinity or other.is_infinity else x_diff_actual
-    let x_diff = select_one_or(
+    let x_diff = select_variable_or_one(
       cs.namespace(|| "Compute x_diff"),
       &x_diff_actual,
-      &at_least_one_inf,
+      &both_not_inf,
     )?;
 
     let x_diff_inv = AllocatedNum::alloc(cs.namespace(|| "x diff inverse"), || {
-      if *at_least_one_inf.get_value().get()? == Fp::one() {
-        //Set to default
-        Ok(Fp::one())
-      } else {
+      if both_not_inf.get_value().is_some() && both_not_inf.get_value().unwrap() {
         //Set to the actual inverse
         let inv = (*other.x.get_value().get()? - *self.x.get_value().get()?).invert();
         if inv.is_some().unwrap_u8() == 1 {
@@ -130,6 +98,9 @@ where
         } else {
           Err(SynthesisError::DivisionByZero)
         }
+      } else {
+        //Set to default
+        Ok(Fp::one())
       }
     })?;
 
@@ -187,8 +158,6 @@ where
       |lc| lc + y.get_variable() + self.y.get_variable(),
     );
 
-    let is_infinity = AllocatedNum::alloc(cs.namespace(|| "is infinity"), || Ok(Fp::zero()))?;
-
     //************************************************************************/
     // We only return the computed x, y if neither of the points is infinity.
     // if self.is_infinity return other.clone()
@@ -196,13 +165,13 @@ where
     // Otherwise return the computed points.
     //************************************************************************/
     //Now compute the output x
-    let inner_x = conditionally_select2(
+    let inner_x = conditionally_select(
       cs.namespace(|| "final x: inner if"),
       &self.x,
       &x,
       &other.is_infinity,
     )?;
-    let final_x = conditionally_select2(
+    let final_x = conditionally_select(
       cs.namespace(|| "final x: outer if"),
       &other.x,
       &inner_x,
@@ -210,27 +179,29 @@ where
     )?;
 
     //The output y
-    let inner_y = conditionally_select2(
+    let inner_y = conditionally_select(
       cs.namespace(|| "final y: inner if"),
       &self.y,
       &y,
       &other.is_infinity,
     )?;
-    let final_y = conditionally_select2(
+    let final_y = conditionally_select(
       cs.namespace(|| "final y: outer if"),
       &other.y,
       &inner_y,
       &self.is_infinity,
     )?;
-
-    //The output is_infinity
-    let inner_is_infinity = conditionally_select2(
-      cs.namespace(|| "final is infinity: inner if"),
+    
+    //is_infinity = if other.is_infinity then self.is_infinity otherwise false => 
+    //self.is_infinity AND other.is_infinity
+    
+    let inner_is_infinity = AllocatedBit::and(
+      cs.namespace(|| "if other.is_infinity then self.is_infinity otherwise false"),
       &self.is_infinity,
-      &is_infinity,
       &other.is_infinity,
     )?;
-    let final_is_infinity = conditionally_select2(
+
+    let final_is_infinity = conditionally_select_bit(
       cs.namespace(|| "final is infinity: outer if"),
       &other.is_infinity,
       &inner_is_infinity,
@@ -262,7 +233,7 @@ where
 
     //Compute inv = tmp.invert
     let tmp_inv = AllocatedNum::alloc(cs.namespace(|| "tmp inverse"), || {
-      if *self.is_infinity.get_value().get()? == Fp::one() {
+      if self.is_infinity.get_value().is_none() || self.is_infinity.get_value().unwrap() {
         //Return default value 1
         Ok(Fp::one())
       } else {
@@ -380,8 +351,8 @@ where
     /*************************************************************/
 
     let zero = alloc_zero(cs.namespace(|| "Allocate zero"))?;
-    let one = alloc_one(cs.namespace(|| "Allocate one"))?;
-    let mut R0 = Self::new(zero.clone(), zero.clone(), one.clone());
+    let true_alloc = alloc_true(cs.namespace(|| "Allocate false"))?;
+    let mut R0 = Self::new(zero.clone(), zero.clone(), true_alloc.clone());
 
     /*************************************************************/
     //Initialize R1 and the bits of the scalar
@@ -408,14 +379,14 @@ where
         cs.namespace(|| format!("{}: Update R0", i)),
         &R0_and_R1,
         &R0_double,
-        &Boolean::from(scalar[i].clone()),
+        &scalar[i].clone(),
       )?;
 
       R1 = Self::conditionally_select(
         cs.namespace(|| format!("{}: Update R1", i)),
         &R1_double,
         &R0_and_R1,
-        &Boolean::from(scalar[i].clone()),
+        &scalar[i].clone(),
       )?;
     }
     Ok(R0)
@@ -437,8 +408,8 @@ where
     /*************************************************************/
 
     let zero = alloc_zero(cs.namespace(|| "Allocate zero"))?;
-    let one = alloc_one(cs.namespace(|| "Allocate one"))?;
-    let mut res = Self::new(zero.clone(), zero.clone(), one.clone());
+    let true_alloc = alloc_true(cs.namespace(|| "Allocate true"))?;
+    let mut res = Self::new(zero.clone(), zero.clone(), true_alloc.clone());
 
     for i in (0..scalar.len()).rev() {
       /*************************************************************/
@@ -458,7 +429,7 @@ where
         cs.namespace(|| format!("{}: Update res", i)),
         &self_and_res,
         &res,
-        &Boolean::from(scalar[i].clone()),
+        &scalar[i],
       )?;
     }
     Ok(res)
@@ -469,19 +440,19 @@ where
     mut cs: CS,
     a: &Self,
     b: &Self,
-    condition: &Boolean,
+    condition: &AllocatedBit,
   ) -> Result<Self, SynthesisError> {
     let x = conditionally_select(cs.namespace(|| "select x"), &a.x, &b.x, condition)?;
 
     let y = conditionally_select(cs.namespace(|| "select y"), &a.y, &b.y, condition)?;
 
-    let is_infinity = conditionally_select(
+    let is_infinity = conditionally_select_bit(
       cs.namespace(|| "select is_infinity"),
       &a.is_infinity,
       &b.is_infinity,
       condition,
     )?;
-
+    
     Ok(Self::new(x, y, is_infinity))
   }
 }
@@ -505,7 +476,6 @@ mod tests {
     CS: ConstraintSystem<Fp>,
   {
     let a = AllocatedPoint::<Fp>::random_vartime(cs.namespace(|| "a")).unwrap();
-    let _ = a.inputize(cs.namespace(|| "inputize a")).unwrap();
     let s = Fq::random(&mut OsRng);
     //Allocate random bits and only keep 128 bits
     let bits: Vec<AllocatedBit> = s
@@ -519,7 +489,6 @@ mod tests {
       //.scalar_mul(cs.namespace(|| "Scalar Mul"), bits[..128].to_vec())
       .scalar_mul(cs.namespace(|| "Scalar Mul"), bits)
       .unwrap();
-    let _ = e.inputize(cs.namespace(|| "inputize e")).unwrap();
     return (a, e, s);
   }
 
@@ -540,12 +509,12 @@ mod tests {
     let a_p: Point<Fp, Fq> = Point::new(
       a.x.get_value().unwrap(),
       a.y.get_value().unwrap(),
-      a.is_infinity.get_value().unwrap() == Fp::one(),
+      a.is_infinity.get_value().unwrap(),
     );
     let e_p: Point<Fp, Fq> = Point::new(
       e.x.get_value().unwrap(),
       e.y.get_value().unwrap(),
-      e.is_infinity.get_value().unwrap() == Fp::one(),
+      e.is_infinity.get_value().unwrap(),
     );
     let e_new = a_p.scalar_mul(&s);
     assert!(e_p.x == e_new.x && e_p.y == e_new.y);

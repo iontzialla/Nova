@@ -1,6 +1,6 @@
 use bellperson::{
   gadgets::{
-    boolean::{AllocatedBit, Boolean},
+    boolean::AllocatedBit, 
     num::AllocatedNum,
     Assignment,
   },
@@ -57,6 +57,7 @@ pub fn alloc_zero<F: PrimeField, CS: ConstraintSystem<F>>(
 }
 
 ///Allocate a variable that is set to one
+#[allow(dead_code)]
 pub fn alloc_one<F: PrimeField, CS: ConstraintSystem<F>>(
   mut cs: CS,
 ) -> Result<AllocatedNum<F>, SynthesisError> {
@@ -69,6 +70,36 @@ pub fn alloc_one<F: PrimeField, CS: ConstraintSystem<F>>(
   );
 
   Ok(one)
+}
+
+///Allocate a variable that is set to false
+pub fn alloc_false<F: PrimeField, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+) -> Result<AllocatedBit, SynthesisError> {
+  let false_alloc = AllocatedBit::alloc(cs.namespace(|| "alloc false"), Some(false))?;
+  cs.enforce(
+    || "check false is valid",
+    |lc| lc + false_alloc.get_variable(),
+    |lc| lc + false_alloc.get_variable(),
+    |lc| lc,
+  );
+
+  Ok(false_alloc)
+}
+
+///Allocate a variable that is set to true
+pub fn alloc_true<F: PrimeField, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+) -> Result<AllocatedBit, SynthesisError> {
+  let true_alloc = AllocatedBit::alloc(cs.namespace(|| "alloc true"), Some(true))?;
+  cs.enforce(
+    || "check true is valid",
+    |lc| lc + true_alloc.get_variable(),
+    |lc| lc + true_alloc.get_variable(),
+    |lc| lc + CS::one(),
+  );
+
+  Ok(true_alloc)
 }
 
 //The next two functions are borrowed from sapling-crypto crate
@@ -176,10 +207,10 @@ pub fn conditionally_select<F: PrimeField, CS: ConstraintSystem<F>>(
   mut cs: CS,
   a: &AllocatedNum<F>,
   b: &AllocatedNum<F>,
-  condition: &Boolean,
+  condition: &AllocatedBit,
 ) -> Result<AllocatedNum<F>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
-    if *condition.get_value().get()? {
+    if condition.get_value().is_some() && condition.get_value().unwrap() {
       Ok(*a.get_value().get()?)
     } else {
       Ok(*b.get_value().get()?)
@@ -192,7 +223,36 @@ pub fn conditionally_select<F: PrimeField, CS: ConstraintSystem<F>>(
   cs.enforce(
     || "conditional select constraint",
     |lc| lc + a.get_variable() - b.get_variable(),
-    |_| condition.lc(CS::one(), F::one()),
+    |lc| lc + condition.get_variable(),
+    |lc| lc + c.get_variable() - b.get_variable(),
+  );
+
+  Ok(c)
+}
+
+///If condition return a otherwise b for a and b bits
+///Returns true if (a AND b) or (cond AND a) or cond AND b
+pub fn conditionally_select_bit<F: PrimeField, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+  a: &AllocatedBit,
+  b: &AllocatedBit,
+  condition: &AllocatedBit,
+) -> Result<AllocatedBit, SynthesisError> {
+  let c = AllocatedBit::alloc(cs.namespace(|| "conditional select result"), {
+    if condition.get_value().is_some() && condition.get_value().unwrap() {
+      a.get_value()
+    } else {
+      b.get_value()
+    }
+  })?;
+
+  // a * condition + b*(1-condition) = c ->
+  // a * condition - b*condition = c - b
+
+  cs.enforce(
+    || "conditional select constraint",
+    |lc| lc + a.get_variable() - b.get_variable(),
+    |lc| lc + condition.get_variable(),
     |lc| lc + c.get_variable() - b.get_variable(),
   );
 
@@ -201,6 +261,7 @@ pub fn conditionally_select<F: PrimeField, CS: ConstraintSystem<F>>(
 
 ///Same as the above but Condition is an AllocatedNum that needs to be
 ///0 or 1. 1 => True, 0 => False
+#[allow(dead_code)]
 pub fn conditionally_select2<F: PrimeField, CS: ConstraintSystem<F>>(
   mut cs: CS,
   a: &AllocatedNum<F>,
@@ -232,10 +293,10 @@ pub fn conditionally_select2<F: PrimeField, CS: ConstraintSystem<F>>(
 pub fn select_zero_or<F: PrimeField, CS: ConstraintSystem<F>>(
   mut cs: CS,
   a: &AllocatedNum<F>,
-  condition: &AllocatedNum<F>,
+  condition: &AllocatedBit,
 ) -> Result<AllocatedNum<F>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
-    if *condition.get_value().get()? == F::one() {
+    if condition.get_value().is_none() || condition.get_value().unwrap() {
       Ok(F::zero())
     } else {
       Ok(*a.get_value().get()?)
@@ -258,10 +319,10 @@ pub fn select_zero_or<F: PrimeField, CS: ConstraintSystem<F>>(
 pub fn select_one_or<F: PrimeField, CS: ConstraintSystem<F>>(
   mut cs: CS,
   a: &AllocatedNum<F>,
-  condition: &AllocatedNum<F>,
+  condition: &AllocatedBit,
 ) -> Result<AllocatedNum<F>, SynthesisError> {
   let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
-    if *condition.get_value().get()? == F::one() {
+    if condition.get_value().is_none() || condition.get_value().unwrap() {
       Ok(F::one())
     } else {
       Ok(*a.get_value().get()?)
@@ -275,4 +336,52 @@ pub fn select_one_or<F: PrimeField, CS: ConstraintSystem<F>>(
     |lc| lc + c.get_variable() - a.get_variable(),
   );
   Ok(c)
+}
+
+///If condition set to a otherwise 1
+pub fn select_variable_or_one<F: PrimeField, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+  a: &AllocatedNum<F>,
+  condition: &AllocatedBit,
+) -> Result<AllocatedNum<F>, SynthesisError> {
+  let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
+    if condition.get_value().is_some() && condition.get_value().unwrap() {
+      Ok(*a.get_value().get()?)
+    } else {
+      Ok(F::one())
+    }
+  })?;
+
+  cs.enforce(
+    || "conditional select constraint",
+    |lc| lc + a.get_variable() - CS::one(),
+    |lc| lc + condition.get_variable(),
+    |lc| lc + c.get_variable() - CS::one(),
+  );
+  Ok(c)
+}
+
+pub fn bit_to_num<F: PrimeField, CS: ConstraintSystem<F>>(
+    mut cs: CS,
+    bit: AllocatedBit
+) -> Result<AllocatedNum<F>, SynthesisError> {
+    let num = AllocatedNum::alloc(
+        cs.namespace(|| "allocate bit from num"),
+        || {
+            if bit.get_value().is_some() && bit.get_value().unwrap() {
+                Ok(F::one())
+            }else{
+                Ok(F::zero())
+            }
+        }
+    )?;
+
+    cs.enforce(
+        || "convert num to bit" ,
+        |lc| lc,
+        |lc| lc,
+        |lc| lc + bit.get_variable() - num.get_variable(),
+    );
+
+    Ok(num)
 }

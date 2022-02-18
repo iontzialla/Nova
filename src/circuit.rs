@@ -2,12 +2,12 @@ use super::commitments::Commitment;
 use super::gadgets::{
   ecc_circuit::AllocatedPoint,
   ro::PoseidonRO,
-  utils::{alloc_num_equals, alloc_one, alloc_zero, conditionally_select, le_bits_to_num},
+  utils::{alloc_num_equals, alloc_true, alloc_zero, conditionally_select, le_bits_to_num, bit_to_num},
 };
 use super::r1cs::RelaxedR1CSInstance;
 use super::traits::{Group, PrimeField};
 use bellperson::{
-  gadgets::{boolean::Boolean, num::AllocatedNum, Assignment},
+  gadgets::{boolean::AllocatedBit, num::AllocatedNum, Assignment},
   Circuit, ConstraintSystem, SynthesisError,
 };
 use ff::PrimeFieldBits;
@@ -128,17 +128,15 @@ where
     let W_r_y = AllocatedNum::alloc(cs.namespace(|| "W_r.y"), || {
       Ok(self.inputs.get()?.u2.comm_W.comm.to_coordinates().1)
     })?;
-    let W_r_inf = AllocatedNum::alloc(cs.namespace(|| "W_r.inf"), || {
-      let infty = self.inputs.get()?.u2.comm_W.comm.to_coordinates().2;
-      if infty {
-        Ok(G::Base::one())
+    let W_r_inf = AllocatedBit::alloc(cs.namespace(|| "W_r.inf"), {
+      if self.inputs.is_some() && self.inputs.as_ref().unwrap().u2.comm_W.comm.to_coordinates().2 {
+        Some(true)
       } else {
-        Ok(G::Base::zero())
+        Some(false)
       }
     })?;
 
     let W_r = AllocatedPoint::new(W_r_x.clone(), W_r_y.clone(), W_r_inf.clone());
-    let _ = W_r.check_is_infinity(cs.namespace(|| "W_r check is_infinity"))?;
 
     //E_r = (x, y, infinity)
     let E_r_x = AllocatedNum::alloc(cs.namespace(|| "E_r.x"), || {
@@ -147,17 +145,15 @@ where
     let E_r_y = AllocatedNum::alloc(cs.namespace(|| "E_r.y"), || {
       Ok(self.inputs.get()?.u2.comm_E.comm.to_coordinates().1)
     })?;
-    let E_r_inf = AllocatedNum::alloc(cs.namespace(|| "E_r.inf"), || {
-      let infty = self.inputs.get()?.u2.comm_E.comm.to_coordinates().2;
-      if infty {
-        Ok(G::Base::one())
+    let E_r_inf = AllocatedBit::alloc(cs.namespace(|| "E_r.inf"), {
+      if self.inputs.is_some() && self.inputs.as_ref().unwrap().u2.comm_E.comm.to_coordinates().2 {
+        Some(true)
       } else {
-        Ok(G::Base::zero())
+        Some(false)
       }
     })?;
 
     let E_r = AllocatedPoint::new(E_r_x.clone(), E_r_y.clone(), E_r_inf.clone());
-    let _ = E_r.check_is_infinity(cs.namespace(|| "E_r check is_infinity"));
 
     //u_r << |G::Base| despite the fact that u_r is a scalar.
     //So we parse all of its bytes as a G::Base element
@@ -203,17 +199,15 @@ where
     let T_y = AllocatedNum::alloc(cs.namespace(|| "T.y"), || {
       Ok(self.inputs.get()?.T.comm.to_coordinates().1)
     })?;
-    let T_inf = AllocatedNum::alloc(cs.namespace(|| "T.inf"), || {
-      let infty = self.inputs.get()?.T.comm.to_coordinates().2;
-      if infty {
-        Ok(G::Base::one())
+    let T_inf = AllocatedBit::alloc(cs.namespace(|| "T.inf"), {
+      if self.inputs.is_some() && self.inputs.as_ref().unwrap().T.comm.to_coordinates().2 {
+        Some(true)
       } else {
-        Ok(G::Base::zero())
-      }
+        Some(false)
+      }    
     })?;
 
     let T = AllocatedPoint::new(T_x.clone(), T_y.clone(), T_inf.clone());
-    let _ = T.check_is_infinity(cs.namespace(|| "T check is_infinity"));
 
     /***********************************************************************/
     //Allocate params
@@ -232,17 +226,15 @@ where
     let W_y = AllocatedNum::alloc(cs.namespace(|| "W.y"), || {
       Ok(self.inputs.get()?.w.comm.to_coordinates().1)
     })?;
-    let W_inf = AllocatedNum::alloc(cs.namespace(|| "w.inf"), || {
-      let infty = self.inputs.get()?.w.comm.to_coordinates().2;
-      if infty {
-        Ok(G::Base::one())
+    let W_inf = AllocatedBit::alloc(cs.namespace(|| "w.inf"), {
+      if self.inputs.is_some() && self.inputs.as_ref().unwrap().w.comm.to_coordinates().2 {
+        Some(true)
       } else {
-        Ok(G::Base::zero())
+        Some(false)
       }
     })?;
 
     let W = AllocatedPoint::new(W_x.clone(), W_y.clone(), W_inf.clone());
-    let _ = W.check_is_infinity(cs.namespace(|| "W check is_infinity"));
 
     /***********************************************************************/
     //Check that h1 = Hash(u2,i,z0,zi)
@@ -253,10 +245,12 @@ where
 
     hasher.absorb(W_r_x.clone());
     hasher.absorb(W_r_y.clone());
-    hasher.absorb(W_r_inf.clone());
+    let W_r_inf_num = bit_to_num(cs.namespace(|| "convert W_r_inf"), W_r_inf.clone())?;
+    hasher.absorb(W_r_inf_num.clone());
     hasher.absorb(E_r_x.clone());
     hasher.absorb(E_r_y.clone());
-    hasher.absorb(E_r_inf.clone());
+    let E_r_inf_num = bit_to_num(cs.namespace(|| "convert E_r_inf"), E_r_inf.clone())?;
+    hasher.absorb(E_r_inf_num.clone());
     hasher.absorb(u_r.clone());
     //TODO: Add X_r
     hasher.absorb(i.clone());
@@ -279,10 +273,10 @@ where
 
     //Allocate 0 and 1
     let zero = alloc_zero(cs.namespace(|| "zero"))?;
-    let one = alloc_one(cs.namespace(|| "one"))?;
+    let true_alloc = alloc_true(cs.namespace(|| "true"))?;
 
     //Compute default values of U2':
-    let zero_commitment = AllocatedPoint::new(zero.clone(), zero.clone(), one.clone());
+    let zero_commitment = AllocatedPoint::new(zero.clone(), zero.clone(), true_alloc.clone());
 
     //W_default and E_default are a commitment to zero
     let W_default = zero_commitment.clone();
@@ -301,10 +295,12 @@ where
     hasher.absorb(h2);
     hasher.absorb(W_x);
     hasher.absorb(W_y);
-    hasher.absorb(W_inf);
+    let W_inf_num = bit_to_num(cs.namespace(|| "convert W_inf"), W_inf.clone())?;
+    hasher.absorb(W_inf_num);
     hasher.absorb(T_x);
     hasher.absorb(T_y);
-    hasher.absorb(T_inf);
+    let T_inf_num = bit_to_num(cs.namespace(|| "convert T_inf"), T_inf.clone())?;
+    hasher.absorb(T_inf_num);
     let r_bits = hasher.get_challenge(cs.namespace(|| "r bits"))?;
     let r = le_bits_to_num(cs.namespace(|| "r"), r_bits.clone())?;
 
@@ -330,11 +326,11 @@ where
     //TODO: Add folding of io
 
     //Now select the default values if i == 0 otherwise the fold values
-    let base_case = Boolean::from(alloc_num_equals(
+    let base_case = alloc_num_equals(
       cs.namespace(|| "Check if base case"),
       i.clone(),
       zero.clone(),
-    )?);
+    )?;
 
     let W_new = AllocatedPoint::conditionally_select(
       cs.namespace(|| "W_new"),
@@ -376,10 +372,12 @@ where
     let mut hasher: PoseidonRO<G::Base, typenum::U10> = PoseidonRO::new();
     hasher.absorb(W_new.x.clone());
     hasher.absorb(W_new.y.clone());
-    hasher.absorb(W_new.is_infinity.clone());
+    let W_new_inf_num = bit_to_num(cs.namespace(|| "convert W_new_inf"), W_new.is_infinity.clone())?;
+    hasher.absorb(W_new_inf_num);
     hasher.absorb(E_new.x.clone());
     hasher.absorb(E_new.y.clone());
-    hasher.absorb(E_new.is_infinity.clone());
+    let E_new_inf_num = bit_to_num(cs.namespace(|| "convert E_new_inf"), E_new.is_infinity.clone())?;
+    hasher.absorb(E_new_inf_num);
     hasher.absorb(u_new.clone());
     //TODO: Add X_r
     hasher.absorb(next_i.clone());

@@ -102,6 +102,12 @@ impl CompressedGroup for PallasCompressedElementWrapper {
   fn as_bytes(&self) -> &[u8] {
     &self.repr
   }
+
+  fn from_bytes(bytes: &[u8]) -> PallasCompressedElementWrapper {
+    PallasCompressedElementWrapper {
+      repr: bytes.try_into().unwrap(),
+    }
+  }
 }
 
 //////////////////////////////////////Vesta////////////////////////////////////////////////
@@ -186,5 +192,10 @@ impl CompressedGroup for VestaCompressedElementWrapper {
   }
   fn as_bytes(&self) -> &[u8] {
     &self.repr
+  }
+  fn from_bytes(bytes: &[u8]) -> VestaCompressedElementWrapper {
+    VestaCompressedElementWrapper {
+      repr: bytes.try_into().unwrap(),
+    }
   }
 }

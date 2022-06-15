@@ -1,7 +1,7 @@
 //! This module defines R1CS related types and a folding scheme for Relaxed R1CS
 #![allow(clippy::type_complexity)]
 use super::{
-  commitments::{CommitGens, CommitTrait, Commitment},
+  commitments::{CommitGens, CommitTrait, Commitment, CompressedCommitment},
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_HASH_BITS},
   errors::NovaError,
   gadgets::utils::scalar_as_base,
@@ -12,6 +12,7 @@ use ff::{Field, PrimeField};
 use flate2::{write::ZlibEncoder, Compression};
 use itertools::concat;
 use merlin::Transcript;
+use num_bigint::BigInt;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
@@ -433,6 +434,20 @@ impl<G: Group> R1CSWitness<G> {
         .collect(),
     }
   }
+
+  /// Creates an R1CSWitness from a serialized R1CSWitness
+  pub fn from_serialized(s: &R1CSWitnessSerialized) -> Result<Self, NovaError> {
+    Ok(R1CSWitness {
+      W: s
+        .W
+        .iter()
+        .map(|x| {
+          G::Scalar::from_str_vartime(&BigInt::from_signed_bytes_le(x).to_str_radix(10))
+            .ok_or(NovaError::DeserializationError)
+        })
+        .collect::<Result<Vec<G::Scalar>, NovaError>>()?,
+    })
+  }
 }
 
 impl<G: Group> R1CSInstance<G> {
@@ -462,6 +477,24 @@ impl<G: Group> R1CSInstance<G> {
         .map(|x| x.to_repr().as_ref().to_vec())
         .collect(),
     }
+  }
+
+  /// Creates a R1CSInstance from a serialized R1CSInstance
+  pub fn from_serialized(s: &R1CSInstanceSerialized) -> Result<Self, NovaError> {
+    let compressed_comm = CompressedCommitment {
+      comm: G::CompressedGroupElement::from_bytes(&s.comm_W),
+    };
+    Ok(R1CSInstance {
+      comm_W: compressed_comm.decompress()?,
+      X: s
+        .X
+        .iter()
+        .map(|x| {
+          G::Scalar::from_str_vartime(&BigInt::from_signed_bytes_le(x).to_str_radix(10))
+            .ok_or(NovaError::DeserializationError)
+        })
+        .collect::<Result<Vec<G::Scalar>, NovaError>>()?,
+    })
   }
 }
 
@@ -545,6 +578,28 @@ impl<G: Group> RelaxedR1CSWitness<G> {
         .collect(),
     }
   }
+
+  /// Creates a RelaxedR1CSWitness from a serialized RelaxedR1CSWitness
+  pub fn from_serialized(s: &RelaxedR1CSWitnessSerialized) -> Result<Self, NovaError> {
+    Ok(RelaxedR1CSWitness {
+      W: s
+        .W
+        .iter()
+        .map(|x| {
+          G::Scalar::from_str_vartime(&BigInt::from_signed_bytes_le(x).to_str_radix(10))
+            .ok_or(NovaError::DeserializationError)
+        })
+        .collect::<Result<Vec<G::Scalar>, NovaError>>()?,
+      E: s
+        .E
+        .iter()
+        .map(|x| {
+          G::Scalar::from_str_vartime(&BigInt::from_signed_bytes_le(x).to_str_radix(10))
+            .ok_or(NovaError::DeserializationError)
+        })
+        .collect::<Result<Vec<G::Scalar>, NovaError>>()?,
+    })
+  }
 }
 
 impl<G: Group> RelaxedR1CSInstance<G> {
@@ -613,6 +668,30 @@ impl<G: Group> RelaxedR1CSInstance<G> {
         .collect(),
       u: self.u.to_repr().as_ref().to_vec(),
     }
+  }
+
+  /// Creates a RelaxedR1CSInstance from a serialized RelaxedR1CSInstance
+  pub fn from_serialized(s: &RelaxedR1CSInstanceSerialized) -> Result<Self, NovaError> {
+    let compressed_comm_W = CompressedCommitment {
+      comm: G::CompressedGroupElement::from_bytes(&s.comm_W),
+    };
+    let compressed_comm_E = CompressedCommitment {
+      comm: G::CompressedGroupElement::from_bytes(&s.comm_E),
+    };
+    Ok(RelaxedR1CSInstance {
+      comm_W: compressed_comm_W.decompress()?,
+      comm_E: compressed_comm_E.decompress()?,
+      X: s
+        .X
+        .iter()
+        .map(|x| {
+          G::Scalar::from_str_vartime(&BigInt::from_signed_bytes_le(x).to_str_radix(10))
+            .ok_or(NovaError::DeserializationError)
+        })
+        .collect::<Result<Vec<G::Scalar>, NovaError>>()?,
+      u: G::Scalar::from_str_vartime(&BigInt::from_signed_bytes_le(&s.u).to_str_radix(10))
+        .ok_or(NovaError::DeserializationError)?,
+    })
   }
 }
 

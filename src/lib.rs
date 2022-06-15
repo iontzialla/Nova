@@ -22,6 +22,7 @@ use crate::bellperson::{
 };
 use ::bellperson::{Circuit, ConstraintSystem};
 use circuit::{NIFSVerifierCircuit, NIFSVerifierCircuitInputs, NIFSVerifierCircuitParams};
+use commitments::CompressedCommitment;
 use constants::{BN_LIMB_WIDTH, BN_N_LIMBS};
 use core::marker::PhantomData;
 use errors::NovaError;
@@ -29,6 +30,7 @@ use ff::Field;
 use ff::PrimeField;
 use gadgets::utils::scalar_as_base;
 use nifs::NIFS;
+use num_bigint::BigInt;
 use poseidon::ROConstantsCircuit; // TODO: make this a trait so we can use it without the concrete implementation
 use r1cs::{
   R1CSGens, R1CSInstance, R1CSInstanceSerialized, R1CSShape, R1CSWitness, R1CSWitnessSerialized,
@@ -426,6 +428,30 @@ where
       zn_secondary: self.zn_secondary.to_repr().as_ref().to_vec(),
     }
   }
+
+  /// Create a SNARK from the serialized version
+  pub fn from_serialized(s: &RecursiveSNARKSerialized) -> Result<Self, NovaError> {
+    Ok(Self {
+      r_W_primary: RelaxedR1CSWitness::from_serialized(&s.r_W_primary)?,
+      r_U_primary: RelaxedR1CSInstance::from_serialized(&s.r_U_primary)?,
+      l_w_primary: R1CSWitness::from_serialized(&s.l_w_primary)?,
+      l_u_primary: R1CSInstance::from_serialized(&s.l_u_primary)?,
+      r_W_secondary: RelaxedR1CSWitness::from_serialized(&s.r_W_secondary)?,
+      r_U_secondary: RelaxedR1CSInstance::from_serialized(&s.r_U_secondary)?,
+      l_w_secondary: R1CSWitness::from_serialized(&s.l_w_secondary)?,
+      l_u_secondary: R1CSInstance::from_serialized(&s.l_u_secondary)?,
+      zn_primary: G1::Scalar::from_str_vartime(
+        &BigInt::from_signed_bytes_le(&s.zn_primary).to_str_radix(10),
+      )
+      .ok_or(NovaError::DeserializationError)?,
+      zn_secondary: G2::Scalar::from_str_vartime(
+        &BigInt::from_signed_bytes_le(&s.zn_secondary).to_str_radix(10),
+      )
+      .ok_or(NovaError::DeserializationError)?,
+      _p_c1: Default::default(),
+      _p_c2: Default::default(),
+    })
+  }
 }
 
 /// A SNARK that proves the knowledge of a valid `RecursiveSNARK`
@@ -615,6 +641,44 @@ where
       zn_primary: self.zn_primary.to_repr().as_ref().to_vec(),
       zn_secondary: self.zn_secondary.to_repr().as_ref().to_vec(),
     }
+  }
+
+  /// Create a SNARK from the serialized version
+  pub fn from_serialized(s: &CompressedSNARKSerialized) -> Result<Self, NovaError> {
+    let compressed_comm_T_primary = CompressedCommitment {
+      comm: G1::CompressedGroupElement::from_bytes(&s.nifs_comm_T_primary),
+    };
+    let compressed_comm_T_secondary = CompressedCommitment {
+      comm: G2::CompressedGroupElement::from_bytes(&s.nifs_comm_T_secondary),
+    };
+    Ok(Self {
+      r_U_primary: RelaxedR1CSInstance::from_serialized(&s.r_U_primary)?,
+      l_u_primary: R1CSInstance::from_serialized(&s.l_u_primary)?,
+      nifs_primary: NIFS {
+        comm_T: compressed_comm_T_primary,
+        _p: Default::default(),
+      },
+      f_W_primary: RelaxedR1CSWitness::from_serialized(&s.f_W_primary)?,
+
+      r_U_secondary: RelaxedR1CSInstance::from_serialized(&s.r_U_secondary)?,
+      l_u_secondary: R1CSInstance::from_serialized(&s.l_u_secondary)?,
+      nifs_secondary: NIFS {
+        comm_T: compressed_comm_T_secondary,
+        _p: Default::default(),
+      },
+      f_W_secondary: RelaxedR1CSWitness::from_serialized(&s.f_W_secondary)?,
+
+      zn_primary: G1::Scalar::from_str_vartime(
+        &BigInt::from_signed_bytes_le(&s.zn_primary).to_str_radix(10),
+      )
+      .unwrap(),
+      zn_secondary: G2::Scalar::from_str_vartime(
+        &BigInt::from_signed_bytes_le(&s.zn_secondary).to_str_radix(10),
+      )
+      .unwrap(),
+      _p_c1: Default::default(),
+      _p_c2: Default::default(),
+    })
   }
 }
 
@@ -840,5 +904,58 @@ mod tests {
 
     assert_eq!(zn_primary, <G1 as Group>::Scalar::one());
     assert_eq!(zn_secondary, <G2 as Group>::Scalar::from(5u64));
+  }
+
+  #[test]
+  fn test_serialize_and_deserialize() {
+    // produce public parameters
+    let pp = PublicParams::<
+      G1,
+      G2,
+      TrivialTestCircuit<<G1 as Group>::Scalar>,
+      TrivialTestCircuit<<G2 as Group>::Scalar>,
+    >::setup(
+      TrivialTestCircuit {
+        _p: Default::default(),
+      },
+      TrivialTestCircuit {
+        _p: Default::default(),
+      },
+    );
+
+    let num_steps = 3;
+
+    // produce a recursive SNARK
+    let res = RecursiveSNARK::prove(
+      &pp,
+      num_steps,
+      <G1 as Group>::Scalar::one(),
+      <G2 as Group>::Scalar::zero(),
+    );
+    assert!(res.is_ok());
+    let recursive_snark = RecursiveSNARK::from_serialized(&res.unwrap().serialize()).unwrap();
+
+    // verify the recursive SNARK
+    let res = recursive_snark.verify(
+      &pp,
+      num_steps,
+      <G1 as Group>::Scalar::one(),
+      <G2 as Group>::Scalar::zero(),
+    );
+    assert!(res.is_ok());
+
+    // produce a compressed SNARK
+    let res = CompressedSNARK::prove(&pp, &recursive_snark);
+    assert!(res.is_ok());
+    let compressed_snark = CompressedSNARK::from_serialized(&res.unwrap().serialize()).unwrap();
+
+    // verify the compressed SNARK
+    let res = compressed_snark.verify(
+      &pp,
+      num_steps,
+      <G1 as Group>::Scalar::one(),
+      <G2 as Group>::Scalar::zero(),
+    );
+    assert!(res.is_ok());
   }
 }

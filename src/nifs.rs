@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 /// A SNARK that holds the proof of a step of an incremental computation
 pub struct NIFS<G: Group> {
   pub(crate) comm_T: CompressedCommitment<G::CompressedGroupElement>,
-  _p: PhantomData<G>,
+  pub(crate) _p: PhantomData<G>,
 }
 
 type ROConstants<G> =

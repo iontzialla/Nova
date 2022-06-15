@@ -65,6 +65,9 @@ pub trait CompressedGroup: Clone + Copy + Debug + Eq + Sized + Send + Sync + 'st
 
   /// Returns a byte array representing the compressed group element
   fn as_bytes(&self) -> &[u8];
+
+  /// Returns a compressed group element from the byte array
+  fn from_bytes(bytes: &[u8]) -> Self;
 }
 
 /// A helper trait to append different types to the transcript

@@ -20,4 +20,6 @@ pub enum NovaError {
   ProofVerifyError,
   /// returned if the provided number of steps is zero
   InvalidNumSteps,
+  /// returned if there is an error when deserializing a struct
+  DeserializationError,
 }

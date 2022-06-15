@@ -9,6 +9,7 @@ use core::{
 };
 use ff::Field;
 use merlin::Transcript;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct CommitGens<G: Group> {
@@ -16,14 +17,14 @@ pub struct CommitGens<G: Group> {
   _p: PhantomData<G>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Commitment<G: Group> {
   pub(crate) comm: G,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompressedCommitment<C: CompressedGroup> {
-  comm: C,
+  pub(crate) comm: C,
 }
 
 impl<G: Group> CommitGens<G> {

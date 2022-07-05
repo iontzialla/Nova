@@ -82,6 +82,8 @@ def write_results_to_csv(results, csv_fname):
 
 if __name__ == "__main__":
     results = parse("compressed-snark.txt");
+    if not os.path.exists('compressed-snark'):
+        os.makedirs('compressed-snark');
     write_results_to_csv(results["Prove"], "compressed-snark/prove.csv")
     write_results_to_csv(results["ProofSize"], "compressed-snark/proof-size.csv")
     write_results_to_csv(results["Verify"], "compressed-snark/verify.csv")

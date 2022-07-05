@@ -103,6 +103,8 @@ def write_results_to_csv(results, csv_fname):
 if __name__ == "__main__":
     # First, parse the results
     results = parse("recursive-snark.txt");
+    if not os.path.exists('recursive-snark'):
+        os.makedirs('recursive-snark');
     medians_per_step = get_medians_per_step(results);
     write_results_to_csv(medians_per_step["Prove"], "recursive-snark/prove.csv")
     write_results_to_csv(medians_per_step["ProofSize"], "recursive-snark/proof-size.csv")

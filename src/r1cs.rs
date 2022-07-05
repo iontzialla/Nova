@@ -5,7 +5,7 @@ use super::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_HASH_BITS},
   errors::NovaError,
   gadgets::utils::scalar_as_base,
-  traits::{AbsorbInROTrait, AppendToTranscriptTrait, Group, HashFuncTrait},
+  traits::{AbsorbInROTrait, AppendToTranscriptTrait, CompressedGroup, Group, HashFuncTrait},
 };
 use bellperson_nonnative::{mp::bignat::nat_to_limbs, util::convert::f_to_nat};
 use core::cmp::max;
@@ -14,7 +14,7 @@ use flate2::{write::ZlibEncoder, Compression};
 use itertools::concat;
 use merlin::Transcript;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha3::{Digest, Sha3_256};
 
 /// Public parameters for a given R1CS
@@ -41,11 +41,24 @@ pub struct R1CSWitness<G: Group> {
   W: Vec<G::Scalar>,
 }
 
+/// Serialized version of a R1CSWitness
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct R1CSWitnessSerialized {
+  W: Vec<Vec<u8>>,
+}
+
 /// A type that holds an R1CS instance
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct R1CSInstance<G: Group> {
   pub(crate) comm_W: Commitment<G>,
   pub(crate) X: Vec<G::Scalar>,
+}
+
+/// Serialized version of a RelaxedR1CSWitness
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct R1CSInstanceSerialized {
+  pub(crate) comm_W: Vec<u8>,
+  pub(crate) X: Vec<Vec<u8>>,
 }
 
 /// A type that holds a witness for a given Relaxed R1CS instance
@@ -55,6 +68,13 @@ pub struct RelaxedR1CSWitness<G: Group> {
   pub(crate) E: Vec<G::Scalar>,
 }
 
+/// Serialized version of a RelaxedR1CSWitness
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RelaxedR1CSWitnessSerialized {
+  W: Vec<Vec<u8>>,
+  E: Vec<Vec<u8>>,
+}
+
 /// A type that holds a Relaxed R1CS instance
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelaxedR1CSInstance<G: Group> {
@@ -62,6 +82,15 @@ pub struct RelaxedR1CSInstance<G: Group> {
   pub(crate) comm_E: Commitment<G>,
   pub(crate) X: Vec<G::Scalar>,
   pub(crate) u: G::Scalar,
+}
+
+/// Serialized version of a RelaxedR1CSWitness
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RelaxedR1CSInstanceSerialized {
+  pub(crate) comm_W: Vec<u8>,
+  pub(crate) comm_E: Vec<u8>,
+  pub(crate) X: Vec<Vec<u8>>,
+  pub(crate) u: Vec<u8>,
 }
 
 impl<G: Group> R1CSGens<G> {
@@ -434,7 +463,7 @@ impl<G: Group> R1CSShape<G> {
   }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct R1CSShapeSerialized {
   num_cons: usize,
   num_vars: usize,
@@ -472,6 +501,17 @@ impl<G: Group> R1CSWitness<G> {
   pub fn commit(&self, gens: &R1CSGens<G>) -> Commitment<G> {
     self.W.commit(&gens.gens)
   }
+
+  /// Serializes the witness in a R1CSWitnessSerialized
+  pub fn serialize(&self) -> R1CSWitnessSerialized {
+    R1CSWitnessSerialized {
+      W: self
+        .W
+        .iter()
+        .map(|x| x.to_repr().as_ref().to_vec())
+        .collect(),
+    }
+  }
 }
 
 impl<G: Group> R1CSInstance<G> {
@@ -488,6 +528,18 @@ impl<G: Group> R1CSInstance<G> {
         comm_W: *comm_W,
         X: X.to_owned(),
       })
+    }
+  }
+
+  /// Serialize the instance to R1CSInstanceSerialized
+  pub fn serialize(&self) -> R1CSInstanceSerialized {
+    R1CSInstanceSerialized {
+      comm_W: self.comm_W.compress().comm.as_bytes().to_vec(),
+      X: self
+        .X
+        .iter()
+        .map(|x| x.to_repr().as_ref().to_vec())
+        .collect(),
     }
   }
 }
@@ -573,6 +625,22 @@ impl<G: Group> RelaxedR1CSWitness<G> {
 
     Self { W, E }
   }
+
+  /// Serializes the witness in a RelaxedR1CSWitnessSerialized
+  pub fn serialize(&self) -> RelaxedR1CSWitnessSerialized {
+    RelaxedR1CSWitnessSerialized {
+      W: self
+        .W
+        .iter()
+        .map(|x| x.to_repr().as_ref().to_vec())
+        .collect(),
+      E: self
+        .E
+        .iter()
+        .map(|x| x.to_repr().as_ref().to_vec())
+        .collect(),
+    }
+  }
 }
 
 impl<G: Group> RelaxedR1CSInstance<G> {
@@ -627,6 +695,20 @@ impl<G: Group> RelaxedR1CSInstance<G> {
       X,
       u,
     })
+  }
+
+  /// Serialize the instance to RelaxedR1CSInstanceSerialized
+  pub fn serialize(&self) -> RelaxedR1CSInstanceSerialized {
+    RelaxedR1CSInstanceSerialized {
+      comm_W: self.comm_W.compress().comm.as_bytes().to_vec(),
+      comm_E: self.comm_E.compress().comm.as_bytes().to_vec(),
+      X: self
+        .X
+        .iter()
+        .map(|x| x.to_repr().as_ref().to_vec())
+        .collect(),
+      u: self.u.to_repr().as_ref().to_vec(),
+    }
   }
 }
 

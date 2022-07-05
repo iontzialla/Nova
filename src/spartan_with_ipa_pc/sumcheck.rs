@@ -4,13 +4,19 @@ use super::polynomial::MultilinearPolynomial;
 use crate::errors::NovaError;
 use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, Group};
 use core::marker::PhantomData;
-use ff::Field;
+use ff::{Field, PrimeField};
 use merlin::Transcript;
 use rayon::prelude::*;
+use serde::Serialize;
 
 #[derive(Debug)]
 pub struct SumcheckProof<G: Group> {
   compressed_polys: Vec<CompressedUniPoly<G>>,
+}
+
+#[derive(Serialize)]
+pub struct SumcheckProofSerialized {
+  compressed_polys: Vec<CompressedUniPolySerialized>,
 }
 
 impl<G: Group> SumcheckProof<G> {
@@ -215,6 +221,16 @@ impl<G: Group> SumcheckProof<G> {
       vec![poly_A[0], poly_B[0], poly_C[0], poly_D[0]],
     )
   }
+
+  pub fn serialize(&self) -> SumcheckProofSerialized {
+    SumcheckProofSerialized {
+      compressed_polys: self
+        .compressed_polys
+        .iter()
+        .map(|x| x.serialize())
+        .collect(),
+    }
+  }
 }
 
 // ax^2 + bx + c stored as vec![a,b,c]
@@ -230,6 +246,12 @@ pub struct UniPoly<G: Group> {
 pub struct CompressedUniPoly<G: Group> {
   coeffs_except_linear_term: Vec<G::Scalar>,
   _p: PhantomData<G>,
+}
+
+/// Serialized version of a compressed uni poly
+#[derive(Serialize)]
+pub struct CompressedUniPolySerialized {
+  coeffs_except_linear_term: Vec<Vec<u8>>,
 }
 
 impl<G: Group> UniPoly<G> {
@@ -317,6 +339,16 @@ impl<G: Group> CompressedUniPoly<G> {
     coeffs.extend(self.coeffs_except_linear_term[1..].to_vec());
     assert_eq!(self.coeffs_except_linear_term.len() + 1, coeffs.len());
     UniPoly { coeffs }
+  }
+
+  pub fn serialize(&self) -> CompressedUniPolySerialized {
+    CompressedUniPolySerialized {
+      coeffs_except_linear_term: self
+        .coeffs_except_linear_term
+        .iter()
+        .map(|x| x.to_repr().as_ref().to_vec())
+        .collect(),
+    }
   }
 }
 

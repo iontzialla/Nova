@@ -4,6 +4,7 @@ use super::{
   r1cs::{R1CSGens, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::Group,
 };
+use serde::Serialize;
 
 /// A trait that defines the behavior of a zkSNARK's prover key
 pub trait ProverKeyTrait<G: Group>: Send + Sync {
@@ -25,6 +26,9 @@ pub trait RelaxedR1CSSNARKTrait<G: Group>: Sized + Send + Sync {
   /// A type that represents the verifier's key
   type VerifierKey: VerifierKeyTrait<G>;
 
+  /// A type that represents the serialized version of the SNARK
+  type Serialized: Serialize;
+
   /// Produces a prover key
   fn prover_key(gens: &R1CSGens<G>, S: &R1CSShape<G>) -> Self::ProverKey {
     Self::ProverKey::new(gens, S)
@@ -44,4 +48,7 @@ pub trait RelaxedR1CSSNARKTrait<G: Group>: Sized + Send + Sync {
 
   /// Verifies a SNARK for a relaxed R1CS
   fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>) -> Result<(), NovaError>;
+
+  /// Serializes the SNARK
+  fn serialize(&self) -> Self::Serialized;
 }

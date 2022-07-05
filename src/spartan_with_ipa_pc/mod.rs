@@ -12,13 +12,17 @@ use super::{
   traits::{AppendToTranscriptTrait, ChallengeTrait, Group},
 };
 use core::cmp::max;
-use ff::Field;
-use ipa::{InnerProductArgument, InnerProductInstance, InnerProductWitness, NIFSForInnerProduct};
+use ff::{Field, PrimeField};
+use ipa::{
+  InnerProductArgument, InnerProductArgumentSerialized, InnerProductInstance, InnerProductWitness,
+  NIFSForInnerProduct, NIFSForInnerProductSerialized,
+};
 use itertools::concat;
 use merlin::Transcript;
 use polynomial::{EqPolynomial, MultilinearPolynomial, SparsePolynomial};
 use rayon::prelude::*;
-use sumcheck::SumcheckProof;
+use serde::Serialize;
+use sumcheck::{SumcheckProof, SumcheckProofSerialized};
 
 /// A type that represents the prover's key
 pub struct ProverKey<G: Group> {
@@ -67,9 +71,22 @@ pub struct RelaxedR1CSSNARK<G: Group> {
   ipa: InnerProductArgument<G>,
 }
 
+/// Serialized version of RelaxedR1CSSNARK
+#[derive(Serialize)]
+pub struct RelaxedR1CSSNARKSerialized {
+  sc_proof_outer: SumcheckProofSerialized,
+  claims_outer: (Vec<u8>, Vec<u8>, Vec<u8>),
+  sc_proof_inner: SumcheckProofSerialized,
+  eval_E: Vec<u8>,
+  eval_W: Vec<u8>,
+  nifs_ip: NIFSForInnerProductSerialized,
+  ipa: InnerProductArgumentSerialized,
+}
+
 impl<G: Group> RelaxedR1CSSNARKTrait<G> for RelaxedR1CSSNARK<G> {
   type ProverKey = ProverKey<G>;
   type VerifierKey = VerifierKey<G>;
+  type Serialized = RelaxedR1CSSNARKSerialized;
 
   /// produces a succinct proof of satisfiability of a RelaxedR1CS instance
   fn prove(
@@ -377,5 +394,22 @@ impl<G: Group> RelaxedR1CSSNARKTrait<G> for RelaxedR1CSSNARK<G> {
     )?;
 
     Ok(())
+  }
+
+  /// Serialize the RelaxedR1CSSNARK
+  fn serialize(&self) -> RelaxedR1CSSNARKSerialized {
+    RelaxedR1CSSNARKSerialized {
+      sc_proof_outer: self.sc_proof_outer.serialize(),
+      claims_outer: (
+        self.claims_outer.0.to_repr().as_ref().to_vec(),
+        self.claims_outer.1.to_repr().as_ref().to_vec(),
+        self.claims_outer.2.to_repr().as_ref().to_vec(),
+      ),
+      sc_proof_inner: self.sc_proof_inner.serialize(),
+      eval_E: self.eval_E.to_repr().as_ref().to_vec(),
+      eval_W: self.eval_W.to_repr().as_ref().to_vec(),
+      nifs_ip: self.nifs_ip.serialize(),
+      ipa: self.ipa.serialize(),
+    }
   }
 }

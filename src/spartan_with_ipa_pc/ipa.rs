@@ -1,11 +1,12 @@
 #![allow(clippy::too_many_arguments)]
 use crate::commitments::{CommitGens, CommitTrait, Commitment, CompressedCommitment};
 use crate::errors::NovaError;
-use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, Group};
+use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, CompressedGroup, Group};
 use core::iter;
-use ff::Field;
+use ff::{Field, PrimeField};
 use merlin::Transcript;
 use rayon::prelude::*;
+use serde::Serialize;
 use std::marker::PhantomData;
 
 pub fn inner_product<T>(a: &[T], b: &[T]) -> T
@@ -52,6 +53,11 @@ impl<G: Group> InnerProductWitness<G> {
 /// A non-interactive folding scheme (NIFS) for inner product relations
 pub struct NIFSForInnerProduct<G: Group> {
   cross_term: G::Scalar,
+}
+
+#[derive(Serialize)]
+pub struct NIFSForInnerProductSerialized {
+  cross_term: Vec<u8>,
 }
 
 impl<G: Group> NIFSForInnerProduct<G> {
@@ -152,6 +158,12 @@ impl<G: Group> NIFSForInnerProduct<G> {
       c,
     }
   }
+
+  pub fn serialize(&self) -> NIFSForInnerProductSerialized {
+    NIFSForInnerProductSerialized {
+      cross_term: self.cross_term.to_repr().as_ref().to_vec(),
+    }
+  }
 }
 
 /// An inner product argument
@@ -161,6 +173,13 @@ pub struct InnerProductArgument<G: Group> {
   R_vec: Vec<CompressedCommitment<G::CompressedGroupElement>>,
   a_hat: G::Scalar,
   _p: PhantomData<G>,
+}
+
+#[derive(Serialize)]
+pub struct InnerProductArgumentSerialized {
+  L_vec: Vec<Vec<u8>>,
+  R_vec: Vec<Vec<u8>>,
+  a_hat: Vec<u8>,
 }
 
 impl<G: Group> InnerProductArgument<G> {
@@ -394,6 +413,22 @@ impl<G: Group> InnerProductArgument<G> {
       Ok(())
     } else {
       Err(NovaError::InvalidIPA)
+    }
+  }
+
+  pub fn serialize(&self) -> InnerProductArgumentSerialized {
+    InnerProductArgumentSerialized {
+      L_vec: self
+        .L_vec
+        .iter()
+        .map(|x| x.comm.as_bytes().to_vec())
+        .collect(),
+      R_vec: self
+        .R_vec
+        .iter()
+        .map(|x| x.comm.as_bytes().to_vec())
+        .collect(),
+      a_hat: self.a_hat.to_repr().as_ref().to_vec(),
     }
   }
 }

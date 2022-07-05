@@ -24,7 +24,7 @@ pub struct Commitment<G: Group> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompressedCommitment<C: CompressedGroup> {
-  comm: C,
+  pub(crate) comm: C,
 }
 
 impl<G: Group> CommitGens<G> {

@@ -77,7 +77,7 @@ def get_medians_per_step(results):
                 if "Prove" not in op: 
                     measurements_per_step.append(float(results[op][num_cons][num_steps]));
                 else: 
-                    if num_steps > 3:
+                    if num_steps > 10:
                         # Append the difference from the previous step
                         measurements_per_step.append(float(results[op][num_cons][num_steps]) - float(results[op][num_cons][num_steps -1 ]));
             n = np.array(measurements_per_step);
